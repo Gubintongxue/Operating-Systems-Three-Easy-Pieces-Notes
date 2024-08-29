@@ -1,9 +1,21 @@
+## 第29章 基于锁的并发数据结构
+
+​		在结束锁的讨论之前，我们先讨论如何在常见数据结构中使用锁。通过锁可以使数据结构线程安全（thread safe）。当然，具体如何加锁决定了该数据结构的正确性和效率？因此，我们的挑战是：
+
+#### 关键问题：如何给数据结构加锁？
+
+​		**对于特定数据结构，如何加锁才能让该结构功能正确？进一步，如何对该数据结构加锁，能够保证高性能，让许多线程同时访问该结构，即并发访问（concurrently）？**
+
+
+
+​		当然，我们很难介绍所有的数据结构，或实现并发的所有方法，因为这是一个研究多年的议题，已经发表了数以千计的相关论文。因此，我们希望能够提供这类思考方式的足够介绍，同时提供一些好的资料，供你自己进一步研究。我们发现，Moir 和 Shavit 的调查[MS04]就是很好的资料。
+
 ### 29.1 并发计数器
 
 计数器是最简单的一种数据结构，使用广泛而且接口简单。图 29.1 中定义了一个非并发的计数器。
 
 ```
-c复制代码typedef struct counter_t { 
+typedef struct counter_t { 
     int value; 
 } counter_t; 
 
@@ -33,7 +45,7 @@ int get(counter_t *c) {
 为了解决并发问题，我们可以通过添加锁来实现线程安全的计数器，如图 29.2 所示。
 
 ```
-c复制代码typedef struct counter_t { 
+typedef struct counter_t { 
     int value; 
     pthread_mutex_t lock; 
 } counter_t; 
@@ -74,7 +86,7 @@ int get(counter_t *c) {
 懒惰计数器的实现如下：
 
 ```
-c复制代码typedef struct counter_t { 
+typedef struct counter_t { 
     int global; // global count 
     pthread_mutex_t glock; // global lock 
     int local[NUMCPUS]; // local count (per CPU) 
@@ -116,9 +128,13 @@ int get(counter_t *c) {
 
 懒惰计数器通过使用局部计数器和全局计数器的组合，使得计数操作在多个线程中更具扩展性。阈值 `S` 决定了局部计数器与全局计数器的更新频率：`S` 值越大，扩展性越好，但全局计数器与实际值的偏差越大。
 
+
+
 ### 小结
 
 我们通过简单的锁来实现了线程安全的计数器，并进一步探讨了如何优化以提高其并发性能。懒惰计数器通过局部计数器的引入，显著减少了锁的争用，从而在多线程环境中实现了更好的性能扩展性。这种方法在实际应用中非常重要，尤其是在高并发系统中。
+
+
 
 ### 29.2 并发链表
 
@@ -129,7 +145,7 @@ int get(counter_t *c) {
 我们首先从一个基础实现开始，只关注链表的插入操作。以下是基本的链表结构和插入、查找操作的实现：
 
 ```
-c复制代码// basic node structure 
+/ basic node structure 
 typedef struct node_t { 
     int key; 
     struct node_t *next; 
@@ -185,7 +201,7 @@ int List_Lookup(list_t *L, int key) {
 为了改进上述实现，我们可以调整代码结构，使得获取和释放锁的操作仅围绕临界区进行。具体来说，我们可以将锁定范围缩小到更新链表的操作，从而减少锁的持有时间并降低复杂度。以下是优化后的代码：
 
 ```
-c复制代码void List_Init(list_t *L) { 
+void List_Init(list_t *L) { 
     L->head = NULL; 
     pthread_mutex_init(&L->lock, NULL); 
 } 
@@ -243,7 +259,7 @@ int List_Lookup(list_t *L, int key) {
 Michael 和 Scott [MS98] 设计的并发队列通过引入双锁机制，实现了高效的并发操作。以下是他们设计的队列的数据结构和实现代码：
 
 ```
-c复制代码typedef struct node_t { 
+typedef struct node_t { 
     int value; 
     struct node_t *next; 
 } node_t; 
@@ -302,7 +318,7 @@ Michael 和 Scott 使用了一个技巧，即在初始化队列时创建一个�
 并发散列表是另一个常用的数据结构，它在多线程环境下可以提高查找和插入操作的效率。以下是一个简单的并发散列表实现：
 
 ```
-c复制代码#define BUCKETS (101) 
+#define BUCKETS (101) 
 
 typedef struct hash_t { 
     list_t lists[BUCKETS]; 
@@ -332,9 +348,23 @@ int Hash_Lookup(hash_t *H, int key) {
 
 在多个线程同时进行插入操作时，这个简单的并发散列表能够表现出极好的扩展性。图 29.10 展示了该并发散列表在不同线程数下的性能表现，与使用单锁的链表相比，并发散列表的扩展性显著提高。
 
+![image-20240829121908564](image/image-20240829121908564.png)
+
 ### 小结
 
 在这一章中，我们讨论了如何使用锁来实现并发队列和并发散列表。通过合理地使用锁，可以有效地提高数据结构的并发性能，减少锁争用带来的性能瓶颈。与此同时，我们也强调了在设计并发数据结构时，避免不成熟的优化，以确保代码的正确性和效率。
+
+
+
+#### 建议：避免不成熟的优化（**Knuth** 定律）
+
+​		实现并发数据结构时，先从最简单的方案开始，也就是加一把大锁来同步。这样做，你很可能构建了正确的锁。如果发现性能问题，那么就改进方法，只要优化到满足需要即可。正如 Knuth 的著名说法“不成熟的优化是所有坏事的根源。” 
+
+​		许多操作系统，在最初过渡到多处理器时都是用一把大锁，包括 Sun 和 Linux。在 Linux 中，这个锁甚至有个名字，叫作 BKL（大内核锁，big kernel lock）。这个方案在很多年里都很有效，直到多 CPU系统普及，内核只允许一个线程活动成为性能瓶颈。终于到了为这些系统优化并发性能的时候了。Linux采用了简单的方案，把一个锁换成多个。Sun 则更为激进，实现了一个最开始就能并发的新系统，Solaris。读者可以通过 Linux 和 Solaris 的内核资料了解更多信息[BC05，MM00]。
+
+
+
+
 
 ### 29.5 小节
 
