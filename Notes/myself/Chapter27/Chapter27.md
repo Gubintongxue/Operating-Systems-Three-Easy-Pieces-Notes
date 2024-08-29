@@ -1,9 +1,17 @@
+## 第27章 插叙：线程API
+
+​		本章介绍了主要的线程 API。后续章节也会进一步介绍如何使用 API。更多的细节可以参考其他书籍和在线资源[B89，B97，B+96，K+96]。随后的章节会慢慢介绍锁和条件变量的概念，因此本章可以作为参考。
+
+#### **关键问题：如何创建和控制线程？**
+
+**操作系统应该提供哪些创建和控制线程的接口？这些接口如何设计得易用和实用？**
+
 ### 27.1 线程创建
 
 编写多线程程序的第一步就是创建新线程，因此必须存在某种线程创建接口。在 POSIX 中，创建线程的方式非常简单：
 
 ```
-c复制代码#include <pthread.h>
+#include <pthread.h>
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void*), void *arg);
 ```
@@ -20,7 +28,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_
 来看一个创建线程的简单例子：
 
 ```
-c复制代码#include <pthread.h>
+#include <pthread.h>
 #include <stdio.h>
 
 typedef struct myarg_t {
@@ -73,7 +81,7 @@ int main(int argc, char *argv[]) {
 来看一个示例代码（见图 27.2）。在这个例子中，我们再次创建了一个线程，并通过 `myarg_t` 结构传递一些参数。线程函数的返回值使用 `myret_t` 类型。当线程完成时，主线程通过 `pthread_join()` 等待线程，并获取线程的返回值，即 `myret_t` 结构中的内容。
 
 ```
-c复制代码#include <stdio.h> 
+#include <stdio.h> 
 #include <pthread.h> 
 #include <assert.h> 
 #include <stdlib.h> 
@@ -121,7 +129,7 @@ int main(int argc, char *argv[]) {
 2. **避免返回栈上的指针**: 如果你在线程函数中分配了栈内存并返回它的地址，如下例所示，那么线程终止时栈内存将被释放，返回的指针将指向无效的内存，导致程序出现不确定行为：
 
 ```
-c复制代码void *mythread(void *arg) { 
+void *mythread(void *arg) { 
     myarg_t *m = (myarg_t *) arg; 
     printf("%d %d\n", m->a, m->b); 
     myret_t r;  // 分配在栈上：不安全！
@@ -134,7 +142,7 @@ c复制代码void *mythread(void *arg) {
 1. **简单情况下的传参与返回**: 如果线程函数只需传入或返回一个简单的值（如 `int`），那么你可以不必创建结构，直接传递参数，如图 27.3 所示：
 
 ```
-c复制代码void *mythread(void *arg) { 
+void *mythread(void *arg) { 
     int m = (int) arg; 
     printf("%d\n", m); 
     return (void *) (m + 1); 
@@ -158,19 +166,115 @@ int main(int argc, char *argv[]) {
 
 通过这些例子和注意事项，你可以更好地理解如何创建和管理线程，确保你的多线程程序正确运行。
 
+
+
+#### 原文：
+
+​		上面的例子展示了如何创建一个线程。但是，如果你想等待线程完成，会发生什么情况？你需要做一些特别的事情来等待完成。具体来说，你必须调用函数 pthread_join()。
+
+​		该函数有两个参数。第一个是 pthread_t 类型，用于指定要等待的线程。这个变量是由线程创建函数初始化的（当你将一个指针作为参数传递给 pthread_create()时）。如果你保留了它，就可以用它来等待该线程终止。
+
+​		第二个参数是一个指针，指向你希望得到的返回值。因为函数可以返回任何东西，所以它被定义为返回一个指向 void 的指针。因为 pthread_join()函数改变了传入参数的值，所以你需要传入一个指向该值的指针，而不只是该值本身。
+
+​		我们来看另一个例子（见图 27.2）。在代码中，再次创建单个线程，并通过 myarg_t 结构传递一些参数。对于返回值，使用 myret_t 型。当线程完成运行时，主线程已经在pthread_join()函数内等待了①。然后会返回，我们可以访问线程返回的值，即在 myret_t 中的内容。
+
+​		有几点需要说明。首先，我们常常不需要这样痛苦地打包、解包参数。如果我们不需要参数，创建线程时传入 NULL 即可。类似的，如果不需要返回值，那么 pthread_join()调用也可以传入 NULL。
+
+```
+1 #include <stdio.h> 
+2 #include <pthread.h> 
+3 #include <assert.h> 
+4 #include <stdlib.h> 
+5 
+6 typedef struct myarg_t { 
+7 int a; 
+8 int b; 
+9 } myarg_t; 
+10 
+11 typedef struct myret_t { 
+12 int x; 
+13 int y; 
+14 } myret_t; 
+15 
+16 void *mythread(void *arg) { 
+17 myarg_t *m = (myarg_t *) arg; 
+18 printf("%d %d\n", m->a, m->b); 
+19 myret_t *r = Malloc(sizeof(myret_t)); 
+20 r->x = 1; 
+21 r->y = 2; 
+22 return (void *) r; 
+23 } 
+24 
+25 int 
+26 main(int argc, char *argv[]) { 
+27 int rc; 
+28 pthread_t p; 
+29 myret_t *m;
+30 
+31 myarg_t args; 
+32 args.a = 10; 
+33 args.b = 20; 
+34 Pthread_create(&p, NULL, mythread, &args); 
+35 Pthread_join(p, (void **) &m); 
+36 printf("returned %d %d\n", m->x, m->y); 
+37 return 0; 
+38 }
+图 27.2 等待线程完成
+```
+
+其次，如果我们只传入一个值（例如，一个 int），也不必将它打包为一个参数。图 27.3 展示了一个例子。在这种情况下，更简单一些，因为我们不必在结构中打包参数和返回值。
+
+```
+void *mythread(void *arg) { 
+ int m = (int) arg; 
+ printf("%d\n", m); 
+ return (void *) (arg + 1); 
+} 
+int main(int argc, char *argv[]) { 
+ pthread_t p; 
+ int rc, m; 
+ Pthread_create(&p, NULL, mythread, (void *) 100); 
+ Pthread_join(p, (void **) &m); 
+ printf("returned %d\n", m); 
+ return 0; 
+}
+图 27.3 较简单的向线程传递参数示例
+```
+
+​		再次，我们应该注注，必须非常小心如何从线程返回值。特别是，永远不要返回一个指针，并让它指向线程调用栈上分配的东西。如果这样做，你认为会发生什么？（想一想！）下面是一段危险的代码示例，对图 27.2 中的示例做了修改。
+
+```
+1 void *mythread(void *arg) { 
+2 myarg_t *m = (myarg_t *) arg; 
+3 printf("%d %d\n", m->a, m->b); 
+4 myret_t r; // ALLOCATED ON STACK: BAD! 
+5 r.x = 1; 
+6 r.y = 2; 
+7 return (void *) &r; 
+8 }
+```
+
+​		在这个例子中，变量 *r* 被分配在 mythread 的栈上。但是，当它返回时，该值会自动释放（这就是栈使用起来很简单的原因！），因此，将指针传回现在已释放的变量将导致各种不好的结果。当然，当你打印出你以为的返回值时，你可能会感到惊讶（但不一定！）。试试看，自己找出真相①！
+
+​		最后，你可能会注注到，使用 pthread_create()创建线程，然后立即调用 pthread_join()，这是创建线程的一种非常奇怪的方式。事实上，有一个更简单的方法来完成这个任务，它被称为过程调用（procedure call）。显然，我们通常会创建不止一个线程并等待它完成，否则根本没有太多的用途。
+
+​		我们应该注注，并非所有多线程代码都使用 join 函数。例如，多线程 Web 服务器可能会创建大量工作线程，然后使用主线程接受请求，并将其无限期地传递给工作线程。因此这样的长期程序可能不需要 join。然而，创建线程来（并行）执行特定任务的并行程序，很可能会使用 join 来确保在退出或进入下一阶段计算之前完成所有这些工作。
+
+
+
 ### 27.3 锁
 
 在多线程编程中，使用锁来提供互斥访问临界区是非常重要的。这意味着在任何给定的时间，只有一个线程可以进入临界区，从而避免竞争条件。POSIX 线程库提供了两种最基本的锁操作函数：
 
 ```
-c复制代码int pthread_mutex_lock(pthread_mutex_t *mutex);
+int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 ```
 
 这些函数的使用非常直接。如果你发现某段代码属于临界区，就需要通过锁来保护它，以确保它按预期运行。代码大致如下：
 
 ```
-c复制代码pthread_mutex_t lock;
+pthread_mutex_t lock;
 pthread_mutex_lock(&lock);
 // 临界区代码，例如：
 x = x + 1;
@@ -192,18 +296,16 @@ pthread_mutex_unlock(&lock);
    - **静态初始化**：使用 `PTHREAD_MUTEX_INITIALIZER` 进行静态初始化。
 
      ```
-     c
-     复制代码
      pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
      ```
-
+     
    - **动态初始化**：调用 `pthread_mutex_init()` 动态初始化。
 
      ```
-     c复制代码int rc = pthread_mutex_init(&lock, NULL);
+  int rc = pthread_mutex_init(&lock, NULL);
      assert(rc == 0);  // 确保初始化成功
      ```
-
+   
    初始化时可以指定锁的属性，通常传入 `NULL` 以使用默认属性。
 
 2. **错误检查**：
@@ -211,7 +313,7 @@ pthread_mutex_unlock(&lock);
    在获取锁和释放锁时，检查返回值是非常重要的。如果不检查错误代码，可能会导致多个线程意外进入临界区。你可以使用如下的封装函数来确保代码整洁并处理错误：
 
    ```
-   c复制代码void Pthread_mutex_lock(pthread_mutex_t *mutex) {
+   void Pthread_mutex_lock(pthread_mutex_t *mutex) {
        int rc = pthread_mutex_lock(mutex);
        assert(rc == 0);
    }
@@ -240,7 +342,7 @@ pthread_mutex_unlock(&lock);
 条件变量（condition variable）是线程库中的一个关键组件，用于在线程之间传递信号，特别是在一个线程需要等待另一个线程完成某些操作时。POSIX 线程库为条件变量提供了两个主要函数：
 
 ```
-c复制代码int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
 int pthread_cond_signal(pthread_cond_t *cond);
 ```
 
@@ -251,14 +353,14 @@ int pthread_cond_signal(pthread_cond_t *cond);
    条件变量通常与锁配合使用。在初始化相关的锁和条件变量之后，程序可以使用它们来控制线程的同步。如下是典型的初始化代码：
 
    ```
-   c复制代码pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+   pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
    ```
 
    或者使用动态初始化：
 
    ```
-   c复制代码pthread_mutex_init(&lock, NULL);
+   pthread_mutex_init(&lock, NULL);
    pthread_cond_init(&cond, NULL);
    ```
 
@@ -267,7 +369,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
    `pthread_cond_wait()` 函数让调用线程进入休眠状态，等待其他线程发出信号。通常，当某些程序状态发生变化时，需要唤醒该线程。典型的用法如下：
 
    ```
-   c复制代码Pthread_mutex_lock(&lock);
+   Pthread_mutex_lock(&lock);
    while (ready == 0)
        Pthread_cond_wait(&cond, &lock);
    Pthread_mutex_unlock(&lock);
@@ -282,7 +384,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
    另一个线程可以通过 `pthread_cond_signal()` 函数发出信号，通知等待线程条件已经改变。例如：
 
    ```
-   c复制代码Pthread_mutex_lock(&lock);
+   Pthread_mutex_lock(&lock);
    ready = 1;
    Pthread_cond_signal(&cond);
    Pthread_mutex_unlock(&lock);
@@ -297,7 +399,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
    - **避免自旋等待**：不要使用忙等待（busy-waiting）来轮询条件的变化，如下面的错误示例：
 
      ```
-     c复制代码while (ready == 0)
+     while (ready == 0)
          ; // 自旋等待
      ```
 
@@ -308,8 +410,6 @@ int pthread_cond_signal(pthread_cond_t *cond);
 编译多线程代码时，需要包含 `pthread.h` 头文件，并在链接时指定 `-pthread` 标记。例如：
 
 ```
-bash
-复制代码
 gcc -o main main.c -Wall -pthread
 ```
 
@@ -320,3 +420,7 @@ gcc -o main main.c -Wall -pthread
 本章介绍了 pthread 库的基本功能，包括线程创建、使用锁进行互斥访问，以及通过条件变量进行线程间的同步信号传递。虽然这些 API 并不复杂，但编写健壮的多线程程序需要小心和细致。
 
 编写并发程序的真正难点在于构建正确的并发逻辑，而不仅仅是调用 API。继续学习并掌握这些工具，将帮助你开发高效且可靠的多线程程序。
+
+
+
+![image-20240828012418193](image/image-20240828012418193.png)
