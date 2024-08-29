@@ -1,3 +1,7 @@
+## 第28章 锁
+
+​		通过对并发的介绍，我们看到了并发编程的一个最基本问题：我们希望原子式执行一系列指令，但由于单处理器上的中断（或者多个线程在多处理器上并发执行），我们做不到。本章介绍了锁（lock），直接解决这一问题。程序员在源代码中加锁，放在临界区周围，保证临界区能够像单条原子指令一样执行。
+
 ### 28.1 锁的基本思想
 
 在并发编程中，锁（lock）是一种机制，用于确保只有一个线程能够访问共享资源或进入临界区。临界区是一段访问共享资源的代码，这段代码必须原子性地执行，以防止数据竞争和不确定性问题。通过加锁，我们可以控制对共享资源的访问，确保数据的一致性和正确性。
@@ -5,15 +9,13 @@
 举个简单的例子，假设有一个共享变量 `balance`，多个线程需要对它进行更新操作：
 
 ```
-c
-复制代码
 balance = balance + 1;
 ```
 
 在多线程环境下，如果不加锁，不同线程的 `balance` 更新操作可能会发生冲突，导致错误的结果。为了避免这种情况，我们可以使用锁来保护这段代码，使其成为一个临界区：
 
 ```
-c复制代码lock_t mutex; // 定义一个全局锁变量 'mutex'
+lock_t mutex; // 定义一个全局锁变量 'mutex'
 ...
 lock(&mutex); // 获取锁
 balance = balance + 1; // 临界区
@@ -29,7 +31,7 @@ unlock(&mutex); // 释放锁
 在 POSIX 线程库（Pthreads）中，锁被称为互斥量（mutex）。互斥量用于在线程之间实现互斥，防止多个线程同时进入临界区，从而避免数据竞争。下面是一个使用 Pthreads 实现锁机制的示例：
 
 ```
-c复制代码pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 Pthread_mutex_lock(&lock); // 获取锁
 balance = balance + 1; // 临界区
@@ -74,7 +76,7 @@ POSIX 提供的锁机制允许程序员根据需要使用不同的锁来保护�
 在单处理器系统中，实现锁的早期方法之一是通过关闭中断来实现互斥。这种方法的代码如下：
 
 ```
-c复制代码void lock() { 
+void lock() { 
     DisableInterrupts(); 
 } 
 void unlock() { 
@@ -97,6 +99,38 @@ void unlock() {
 
 由于这些缺点，关闭中断的方法通常只在一些特殊情况下使用，例如操作系统内核中需要临时保证原子性的操作。在一般的应用程序中，这种方法并不适合用来实现锁。
 
+
+
+#### 补充：DEKKER 算法和 PETERSON 算法
+
+​		**20 世纪 60 年代，Dijkstra 向他的朋友们提出了并发问题，他的数学家朋友 Theodorus Jozef Dekker想出了一个解决方法。不同于我们讨论的需要硬件指令和操作系统支持的方法，Dekker 的算法（Dekker’s algorithm）只使用了 load 和 store（早期的硬件上，它们是原子的）。Peterson 后来改进了 Dekker 的方法[P81]。同样只使用 load 和 store，保证不会有两个线程同时进入临界区。以下是 Peterson 算法（Peterson’s algorithm，针对两个线程），读者可以尝试理解这些代码吗？flag 和 turn 变量是用来做什么的？**
+
+```
+int flag[2]; 
+int turn; 
+void init() { 
+ flag[0] = flag[1] = 0; // 1->thread wants to grab lock 
+ turn = 0; // whose turn? (thread 0 or 1?) 
+} 
+void lock() { 
+ flag[self] = 1; // self: thread ID of caller 
+ turn = 1 - self; // make it other thread's turn 
+ while ((flag[1-self] == 1) && (turn == 1 - self)) 
+ ; // spin-wait 
+} 
+void unlock() { 
+ flag[self] = 0; // simply undo your intent 
+}
+```
+
+​		**一段时间以来，出于某种原因，大家都热衷于研究不依赖硬件支持的锁机制。后来这些工作都没有太多意义，因为只需要很少的硬件支持，实现锁就会容易很多（实际在多处理器的早期，就有这些硬件支持）。而且上面提到的方法无法运行在现代硬件（应为松散内存一致性模型），导致它们更加没有用处。更多的相关研究也湮没在历史中……**
+
+
+
+
+
+
+
 ### 28.6 测试并设置指令（原子交换）
 
 由于在多处理器环境中关闭中断的方法不能工作，系统设计者为硬件引入了对锁的支持。最早的多处理器系统，如20世纪60年代早期的Burroughs B5000，就已经包含了这种支持。如今，所有系统（甚至单处理器系统）都具备了这样的功能。
@@ -106,7 +140,7 @@ void unlock() {
 在初次尝试中，我们可以使用一个变量来表示锁是否被线程占用。下图 28.1 显示了这一方法的代码实现。
 
 ```
-c复制代码typedef struct lock_t { 
+typedef struct lock_t { 
     int flag; 
 } lock_t; 
 
@@ -151,6 +185,49 @@ void unlock(lock_t *mutex) {
 
 性能问题主要出现在**自旋等待**（spin-waiting）时，即当一个线程在等待另一个线程释放锁时，采用了自旋的方式。这种方式会浪费CPU时间，尤其是在单处理器上，等待的线程甚至无法运行目标线程，因为它被上下文切换阻止了。我们需要一个更成熟的解决方案来避免这种浪费。
 
+
+
+#### 原文：
+
+​		因为关闭中断的方法无法工作在多处理器上，所以系统设计者开始让硬件支持锁。最早的多处理器系统，像 20 世纪 60 年代早期的 Burroughs B5000[M82]，已经有这些支持。今天所有的系统都支持，甚至包括单 CPU 的系统。
+
+​		最简单的硬件支持是测试并设置指令（test-and-set instruction），也叫作原子交换（atomic exchange）。为了理解 test-and-set 如何工作，我们首先实现一个不依赖它的锁，用一个变量标记锁是否被持有。
+
+​		在第一次尝试中（见图 28.1），想法很简单：用一个变量来标志锁是否被某些线程占用。第一个线程进入临界区，调用 lock()，检查标志是否为 1（这里不是 1），然后设置标志为 1，表明线程持有该锁。结束临界区时，线程调用 unlock()，清除标志，表示锁未被持有。
+
+```C
+1 typedef struct lock_t { int flag; } lock_t; 
+2 
+3 void init(lock_t *mutex) { 
+4 // 0 -> lock is available, 1 -> held 
+5 mutex->flag = 0; 
+6 } 
+7 
+8 void lock(lock_t *mutex) { 
+9 while (mutex->flag == 1) // TEST the flag 
+10 ; // spin-wait (do nothing) 
+11 mutex->flag = 1; // now SET it! 
+12 } 
+13 
+14 void unlock(lock_t *mutex) { 
+15 mutex->flag = 0; 
+16 }
+```
+
+​		当第一个线程正处于临界区时，如果另一个线程调用 lock()，它会在 while 循环中自旋等待（spin-wait)，直到第一个线程调用 unlock()清空标志。然后等待的线程会退出 while 循环，设置标志，执行临界区代码。
+
+​		遗憾的是，这段代码有两个问题：正确性和性能。这个正确性问题在并发编程中很常见。假设代码按照表 28.1 执行，开始时 flag=0。
+
+![image-20240829111813174](image/image-20240829111813174.png)
+
+​		从这种交替执行可以看出，通过适时的（不合时宜的？）中断，我们很容易构造出两个线程都将标志设置为 1，都能进入临界区的场景。这种行为就是专家所说的“不好”，我们显然没有满足最基本的要求：互斥。
+
+​		性能问题（稍后会有更多讨论）主要是线程在等待已经被持有的锁时，采用了自旋等待（spin-waiting）的技术，就是不停地检查标志的值。自旋等待在等待其他线程释放锁的时候会浪费时间。尤其是在单处理器上，一个等待线程等待的目标线程甚至无法运行（至少在上下文切换之前）！我们要开发出更成熟的解决方案，也应该考虑避免这种浪费。
+
+
+
+
+
 ### 28.7 实现可用的自旋锁
 
 尽管前面的实现思路很好，但没有硬件支持就无法实现。幸运的是，现代系统提供了这种硬件支持，可以基于这个概念创建简单的锁。这个更强大的指令被称为**测试并设置指令**（test-and-set instruction），也叫作**原子交换**（atomic exchange）。在不同平台上，这个指令有不同的名字：在 SPARC 上叫 `ldstub`（load/store unsigned byte），在 x86 上叫 `xchg`（atomic exchange）。它们基本上实现了相同的功能。
@@ -158,7 +235,7 @@ void unlock(lock_t *mutex) {
 我们用如下的C代码片段定义了测试并设置指令的功能：
 
 ```
-c复制代码int TestAndSet(int *old_ptr, int new) { 
+int TestAndSet(int *old_ptr, int new) { 
     int old = *old_ptr; // fetch old value at old_ptr 
     *old_ptr = new; // store 'new' into old_ptr 
     return old; // return the old value 
@@ -168,7 +245,7 @@ c复制代码int TestAndSet(int *old_ptr, int new) {
 这个函数返回 `old_ptr` 指向的旧值，同时更新为 `new` 值。关键在于这些操作是原子地执行的。基于此，我们可以实现一个简单的自旋锁，如图 28.2 所示。
 
 ```
-c复制代码typedef struct lock_t { 
+typedef struct lock_t { 
     int flag; 
 } lock_t; 
 
@@ -202,6 +279,55 @@ void unlock(lock_t *lock) {
 
 这种思考方式对于编写健壮的并发程序至关重要。每个细节都可能导致程序行为的显著变化，必须认真对待并加以处理。
 
+
+
+#### 原文：
+
+​		尽管上面例子的想法很好，但没有硬件的支持是无法实现的。幸运的是，一些系统提供了这一指令，支持基于这种概念创建简单的锁。这个更强大的指令有不同的名字：在 SPARC上，这个指令叫 ldstub（load/store unsigned byte，加载/保存无符号字节）；在 x86 上，是 xchg（atomic exchange，原子交换）指令。但它们基本上在不同的平台上做同样的事，通常称为测试并设置指令（test-and-set）。我们用如下的 C 代码片段来定义测试并设置指令做了什么：
+
+```
+1 int TestAndSet(int *old_ptr, int new) { 
+2 int old = *old_ptr; // fetch old value at old_ptr 
+3 *old_ptr = new; // store 'new' into old_ptr 
+4 return old; // return the old value 
+5 }
+```
+
+​		测试并设置指令做了下述事情。它返回 old_ptr 指向的旧值，同时更新为 new 的新值。当然，关键是这些代码是原子地（atomically）执行。因为既可以测试旧值，又可以设置新值，所以我们把这条指令叫作“测试并设置”。这一条指令完全可以实现一个简单的自旋锁（spin lock），如图 28.2 所示。或者你可以先尝试自己实现，这样更好！
+
+​		我们来确保理解为什么这个锁能工作。首先假设一个线程在运行，调用 lock()，没有其他线程持有锁，所以 flag 是 0。当调用 TestAndSet(flag, 1)方法，返回 0，线程会跳出 while循环，获取锁。同时也会原子的设置 flag 为 1，标志锁已经被持有。当线程离开临界区，调用 unlock()将 flag 清理为 0。
+
+```
+1 typedef struct lock_t { 
+2 int flag; 
+3 } lock_t; 
+4 
+5 void init(lock_t *lock) { 
+6 // 0 indicates that lock is available, 1 that it is held 
+7 lock->flag = 0; 
+8 } 
+9 
+10 void lock(lock_t *lock) { 
+11 while (TestAndSet(&lock->flag, 1) == 1) 
+12 ; // spin-wait (do nothing) 
+13 } 
+14 
+15 void unlock(lock_t *lock) { 
+16 lock->flag = 0; 
+17 }
+图 28.2 利用测试并设置的简单自旋锁
+```
+
+​		第二种场景是，当某一个线程已经持有锁（即 flag 为 1）。本线程调用 lock()，然后调用TestAndSet(flag, 1)，这一次返回 1。只要另一个线程一直持有锁，TestAndSet()会重复返回 1，本线程会一直自旋。当 flag 终于被改为 0，本线程会调用 TestAndSet()，返回 0 并且原子地设置为 1，从而获得锁，进入临界区。
+
+​		将测试（test 旧的锁值）和设置（set 新的值）合并为一个原子操作之后，我们保证了只有一个线程能获取锁。这就实现了一个有效的互斥原语！你现在可能也理解了为什么这种锁被称为自旋锁（spin lock）。这是最简单的一种锁，一直自旋，利用 CPU 周期，直到锁可用。在单处理器上，需要抢占式的调度器（preemptive scheduler，即不断通过时钟中断一个线程，运行其他线程）。否则，自旋锁在单 CPU 上无法使用，因为一个自旋的线程永远不会放弃 CPU。
+
+#### 提示：从恶意调度程序的角度想想并发
+
+​		通过这个例子，你可能会明白理解并发执行所需的方法。你应该试着假装自己是一个恶意调度程序（malicious scheduler），会最不合时宜地中断线程，从而挫败它们在构建同步原语方面的微弱尝试。你是多么坏的调度程序！虽然中断的确切顺序也许未必会发生，但这是可能的，我们只需要以此证明某种特定的方法不起作用。恶意思考可能会有用！（至少有时候有用。）
+
+
+
 ### 28.8 评价自旋锁
 
 现在我们可以使用之前设定的标准来评价自旋锁的表现。首先是**正确性**：自旋锁是否能够保证互斥？答案是肯定的。自旋锁一次只允许一个线程进入临界区，因此它是一个正确的锁。
@@ -219,7 +345,7 @@ void unlock(lock_t *lock) {
 在某些系统中，除了测试并设置指令，还提供了**比较并交换**指令。SPARC系统中称为 `compare-and-swap`，x86系统中称为 `compare-and-exchange`。图28.3展示了这条指令的C语言伪代码。
 
 ```
-c复制代码int CompareAndSwap(int *ptr, int expected, int new) { 
+int CompareAndSwap(int *ptr, int expected, int new) { 
     int actual = *ptr; 
     if (actual == expected) 
         *ptr = new; 
@@ -234,7 +360,7 @@ c复制代码int CompareAndSwap(int *ptr, int expected, int new) {
 有了**比较并交换**指令，我们可以像使用**测试并设置**一样实现一个自旋锁。以下是 `lock()` 函数的实现代码：
 
 ```
-c复制代码void lock(lock_t *lock) { 
+void lock(lock_t *lock) { 
     while (CompareAndSwap(&lock->flag, 0, 1) == 1) 
         ; // spin 
 }
@@ -242,12 +368,38 @@ c复制代码void lock(lock_t *lock) {
 
 其余的代码与使用**测试并设置**指令实现的自旋锁完全相同。这段代码的工作方式与之前的锁类似：它检查`flag`是否为0，如果是，则将其原子性地更新为1，从而获取锁。若锁已经被持有，其他竞争的线程将会自旋等待。
 
+
+
+如果你想看看如何创建建 C 可调用的 x86 版本的比较并交换，下面的代码段可能有用（来自[S05])：
+
+```
+1 char CompareAndSwap(int *ptr, int old, int new) { 
+2 unsigned char ret; 
+3 
+4 // Note that sete sets a 'byte' not the word 
+5 __asm__ __volatile__ ( 
+6 " lock\n" 
+7 " cmpxchgl %2,%1\n" 
+8 " sete %0\n" 
+9 : "=q" (ret), "=m" (*ptr) 
+10 : "r" (new), "m" (*ptr), "a" (old) 
+11 : "memory"); 
+12 return ret; 
+13 }
+```
+
+最后，你可能会发现，比较并交换指令比测试并设置更强大。当我们在将来简单探讨无等待同步（wait-free synchronization）[H91]时，会用到这条指令的强大之处。然而，如果只用它实现一个简单的自旋锁，它的行为等价于上面分析的自旋锁。
+
+
+
+
+
 ### 28.10 链接的加载和条件式存储指令
 
 一些平台提供了用于实现临界区的特定指令组合。例如，MIPS架构中的**链接的加载**（load-linked）和**条件式存储**（store-conditional）指令可用于实现锁等并发结构。图28.4展示了这些指令的C语言伪代码。
 
 ```
-c复制代码int LoadLinked(int *ptr) { 
+int LoadLinked(int *ptr) { 
     return *ptr; 
 }
 
@@ -268,7 +420,7 @@ int StoreConditional(int *ptr, int value) {
 以下是使用**链接的加载**和**条件式存储**实现一个锁的代码：
 
 ```
-c复制代码void lock(lock_t *lock) { 
+void lock(lock_t *lock) { 
     while (1) { 
         while (LoadLinked(&lock->flag) == 1) 
             ; // spin until it's zero 
@@ -291,12 +443,78 @@ void unlock(lock_t *lock) {
 
 总结：通过这一章节的讨论，我们了解了多种锁的实现方法，包括**测试并设置**和**比较并交换**，以及如何使用**链接的加载**和**条件式存储**指令来构建有效的锁。这些锁机制为并发编程提供了关键的基础。
 
+
+
+#### 原文：
+
+一些平台提供了实现临界区的一对指令。例如 MIPS 架构[H93]中，链接的加载（load-linked）和条件式存储（store-conditional）可以用来配合使用，实现其他并发结构。图 28.4 是这些指令的 C 语言伪代码。Alpha、PowerPC 和 ARM 都提供类似的指令[W09]。
+
+```
+1 int LoadLinked(int *ptr) { 
+2 return *ptr; 
+3 } 
+4 
+5 int StoreConditional(int *ptr, int value) { 
+6 if (no one has updated *ptr since the LoadLinked to this address) {
+7 *ptr = value; 
+8 return 1; // success! 
+9 } else { 
+10 return 0; // failed to update 
+11 } 
+12 }
+图 28.4 链接的加载和条件式存储
+```
+
+​		链接的加载指令和典型加载指令类似，都是从内存中取出值存入一个寄存器。关键区别来自条件式存储（store-conditional）指令，只有上一次加载的地址在期间都没有更新时，才会成功，（同时更新刚才链接的加载的地址的值）。成功时，条件存储返回 1，并将 ptr 指的值更新为 value。失败时，返回 0，并且不会更新值。
+
+​		你可以挑战一下自己，使用链接的加载和条件式存储来实现一个锁。完成之后，看看下面代码提供的简单解决方案。试一下！解决方案如图 28.5 所示。
+
+​		lock()代码是唯一有趣的代码。首先，一个线程自旋等待标志被设置为 0（因此表明锁没有被保持）。一旦如此，线程尝试通过条件存储获取锁。如果成功，则线程自动将标志值更改为 1，从而可以进入临界区。
+
+```
+1 void lock(lock_t *lock) { 
+2 while (1) { 
+3 while (LoadLinked(&lock->flag) == 1) 
+4 ; // spin until it's zero 
+5 if (StoreConditional(&lock->flag, 1) == 1) 
+6 return; // if set-it-to-1 was a success: all done 
+7 // otherwise: try it all over again 
+8 } 
+9 } 
+10 
+11 void unlock(lock_t *lock) { 
+12 lock->flag = 0; 
+13 }
+图 28.5 使用 LL/SC 实现锁
+```
+
+#### 提示：代码越少越好（劳尔定律）
+
+​		**程序员倾向于吹嘘自己使用大量的代码实现某功能。这样做本质上是不对的。我们应该吹嘘以很少的代码实现给定的任务。简洁的代码更易懂，缺陷更少。正如 Hugh Lauer 在讨论构建一个飞行员操作系统时说：“如果给同样这些人两倍的时间，他们可以只用一半的代码来实现”[L81]。我们称之为劳尔定律（Lauer’s Law），很值得记住。下次你吹嘘写了多少代码来完成作业时，三思而后行，或者更好的做法是，回去重写，让代码更清晰、精简。**
+
+
+
+​		请注意条件式存储失败是如何发生的。一个线程调用 lock()，执行了链接的加载指令，返回 0。在执行条件式存储之前，中断产生了，另一个线程进入 lock 的代码，也执行链接式加载指令，同样返回 0。现在，两个线程都执行了链接式加载指令，将要执行条件存储。重点是只有一个线程能够成功更新标志为 1，从而获得锁；第二个执行条件存储的线程会失败（因为另一个线程已经成功执行了条件更新），必须重新尝试获取锁。
+
+​		在几年前的课上，一位本科生同学 David Capel 给出了一种更为简洁的实现，献给那些喜欢布尔条件短路的人。看看你是否能弄清楚为什么它是等价的。当然它更短！
+
+```
+1 void lock(lock_t *lock) { 
+2 while (LoadLinked(&lock->flag)||!StoreConditional(&lock->flag, 1)) 
+3 ; // spin 
+4 }
+```
+
+
+
+
+
 ### 28.11 获取并增加
 
 **获取并增加**（fetch-and-add）是一种简单而强大的硬件原语，能够原子地返回特定内存地址的旧值，并将该值自增1。其C语言伪代码如下：
 
 ```
-c复制代码int FetchAndAdd(int *ptr) { 
+int FetchAndAdd(int *ptr) { 
     int old = *ptr; 
     *ptr = old + 1; 
     return old; 
@@ -308,7 +526,7 @@ c复制代码int FetchAndAdd(int *ptr) {
 以下是实现 ticket 锁的代码示例：
 
 ```
-c复制代码typedef struct lock_t { 
+typedef struct lock_t { 
     int ticket; 
     int turn; 
 } lock_t;
@@ -347,16 +565,18 @@ Ticket 锁的一个重要特性是它能够保证所有线程最终都能获得�
 
 因此，接下来的关键问题是：
 
-**关键问题：如何避免自旋？**
+#### **关键问题：如何避免自旋？**
 
-仅靠硬件支持是不够的，我们需要操作系统的帮助来避免这种不必要的自旋。我们将在后续内容中讨论如何通过结合操作系统和硬件特性来实现更高效的锁机制，以减少或者消除自旋等待的浪费。
+**仅靠硬件支持是不够的，我们需要操作系统的帮助来避免这种不必要的自旋。我们将在后续内容中讨论如何通过结合操作系统和硬件特性来实现更高效的锁机制，以减少或者消除自旋等待的浪费。**
+
+
 
 ### 28.13 简单方法：让出来吧，宝贝
 
 在面对自旋锁浪费CPU资源的问题时，有一种简单且友好的改进方法：在自旋等待时主动放弃CPU，以允许其他线程运行。这种方法被称为“让出来吧，宝贝！”（yield）。图28.7展示了这种方法的实现。
 
 ```
-c复制代码void init() { 
+void init() { 
     flag = 0; 
 } 
 
@@ -389,7 +609,7 @@ void unlock() {
 Solaris操作系统提供了两个系统调用`park()`和`unpark(threadID)`，可以用来实现这种基于队列的锁。`park()`让调用线程进入休眠状态，`unpark(threadID)`则会唤醒指定的线程。图28.8展示了这种锁的实现：
 
 ```
-c复制代码typedef struct lock_t { 
+typedef struct lock_t { 
     int flag; 
     int guard; 
     queue_t *q; 
@@ -451,7 +671,7 @@ futex有两个主要的系统调用：
 以下是一个基于Linux环境下的futex锁实现示例：
 
 ```
-c复制代码void mutex_lock (int *mutex) { 
+void mutex_lock (int *mutex) { 
     int v; 
     /* Bit 31 was clear, we got the mutex (this is the fastpath) */ 
     if (atomic_bit_test_set (mutex, 31) == 0) 
