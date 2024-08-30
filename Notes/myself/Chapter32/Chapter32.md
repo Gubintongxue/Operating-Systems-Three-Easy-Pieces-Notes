@@ -12,7 +12,7 @@
 
 表 32.1 展示了这些应用程序中发现的 105 个缺陷的分布情况，其中大部分（74 个）是非死锁缺陷，其余 31 个是死锁缺陷。通过分析这些缺陷的类型，我们可以更好地理解并发编程中需要注意的问题。
 
-
+![image-20240830122325537](image/image-20240830122325537.png)
 
 ### 32.2 非死锁缺陷
 
@@ -23,7 +23,7 @@
 违反原子性缺陷是指一段代码假设某些操作是原子的，但在实际执行中，这些操作并未实现原子性，导致程序出现问题。以下是一个出现在 MySQL 中的例子：
 
 ```
-c复制代码Thread 1:: 
+Thread 1:: 
 if (thd->proc_info) { 
     ... 
     fputs(thd->proc_info, ...); 
@@ -39,7 +39,7 @@ thd->proc_info = NULL;
 修复这个问题的通常方法是对共享变量的访问进行加锁，确保每个线程在访问 `proc_info` 字段时，都持有锁。下面是修复后的代码：
 
 ```
-c复制代码pthread_mutex_t proc_info_lock = PTHREAD_MUTEX_INITIALIZER; 
+pthread_mutex_t proc_info_lock = PTHREAD_MUTEX_INITIALIZER; 
 
 Thread 1:: 
 pthread_mutex_lock(&proc_info_lock); 
@@ -61,7 +61,7 @@ pthread_mutex_unlock(&proc_info_lock);
 违反顺序缺陷发生在两个内存访问的预期顺序被打破的情况下。以下是一个例子：
 
 ```
-c复制代码Thread 1:: 
+Thread 1:: 
 void init() { 
     ... 
     mThread = PR_CreateThread(mMain, ...); 
@@ -81,7 +81,7 @@ void mMain(...) {
 为了修复这个问题，可以使用条件变量来强制执行代码的顺序。以下是修复后的代码：
 
 ```
-c复制代码pthread_mutex_t mtLock = PTHREAD_MUTEX_INITIALIZER; 
+pthread_mutex_t mtLock = PTHREAD_MUTEX_INITIALIZER; 
 pthread_cond_t mtCond = PTHREAD_COND_INITIALIZER; 
 int mtInit = 0; 
 
@@ -125,12 +125,14 @@ Lu 等人的研究表明，绝大多数非死锁问题都是违反原子性和�
 死锁（deadlock）是并发系统中一个经典且复杂的问题，通常发生在多个线程争夺多个资源时。死锁的典型场景是一个线程持有锁 L1，并等待获取锁 L2，而另一个线程持有锁 L2，并等待锁 L1，如下所示：
 
 ```
-c复制代码Thread 1:                Thread 2:
+Thread 1:                Thread 2:
 lock(L1);                lock(L2);
 lock(L2);                lock(L1);
 ```
 
 如果线程 1 和线程 2 都尝试获取对方持有的锁，就会陷入相互等待的状态，导致死锁。图 32.1 描绘了这种依赖关系的循环（cycle），其中的环路表明了死锁的形成。
+
+![image-20240830122412278](image/image-20240830122412278.png)
 
 #### 关键问题：如何对付死锁
 
@@ -159,6 +161,28 @@ lock(L2);                lock(L1);
 3. **非抢占策略**：使用 `trylock()` 方法尝试获取锁，如果失败，则释放已经持有的锁并重试。这种方法虽然避免了死锁，但可能导致活锁（livelock），即系统忙于获取锁但没有进展。
 4. **避免互斥**：通过使用无等待（wait-free）数据结构或原子操作，避免锁的使用。例如，使用硬件支持的比较并交换（compare-and-swap, CAS）指令可以实现无锁的原子操作，从而避免死锁。
 
+
+
+#### 提示：通过锁的地址来强制锁的顺序
+
+​		当一个函数要抢多个锁时，我们需要注意死锁。比如有一个函数：do_something(mutex t *m1, mutex t *m2)，如果函数总是先抢 m1，然后 m2，那么当一个线程调用 do_something(L1, L2)，而另一个线程调用 do_something(L2, L1)时，就可能会产生死锁。 
+
+​		为了避免这种特殊问题，聪明的程序员根据锁的地址作为获取锁的顺序。按照地址从高到低，或者从低到高的顺序加锁，do_something()函数就可以保证不论传入参数是什么顺序，函数都会用固定的顺序加锁。具体的代码如下：
+
+```
+if (m1 > m2) { // grab locks in high-to-low address order 
+ pthread_mutex_lock(m1); 
+ pthread_mutex_lock(m2); 
+} else { 
+ pthread_mutex_lock(m2); 
+ pthread_mutex_lock(m1);
+ } 
+// Code assumes that m1 != m2 (it is not the same lock) 
+在获取多个锁时，通过简单的技巧，就可以确保简单有效的无死锁实现。
+```
+
+
+
 #### 通过调度避免死锁
 
 在某些场景下，可以通过聪明的线程调度策略来避免死锁。例如，如果知道某些线程需要获取相同的锁资源，可以确保它们不同时运行，从而避免死锁。虽然这种方法在某些嵌入式系统中有效，但一般情况下，它限制了系统的并发性。
@@ -166,6 +190,10 @@ lock(L2);                lock(L1);
 #### 检查和恢复
 
 另一种应对死锁的策略是允许死锁偶尔发生，然后通过检查和恢复机制来处理。许多数据库系统采用这种策略，它们会定期检查系统状态，发现死锁时，强制中止并恢复受影响的线程。虽然这种策略允许系统继续运行，但可能会对性能产生一定影响。
+
+
+
+
 
 ### 32.4 小结
 
