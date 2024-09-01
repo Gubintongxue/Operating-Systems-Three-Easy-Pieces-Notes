@@ -1,3 +1,17 @@
+## 第39章 插叙：文件和目录
+
+​		到目前为止，我们看到了两项关键操作系统技术的发展：进程，它是虚拟化的 CPU；地址空间，它是虚拟化的内存。在这两种抽象共同作用下，程序运行时就好像它在自己的私有独立世界中一样，好像它有自己的处理器（或多处理器），好像它有自己的内存。这种假象使得对系统编程变得更容易，因此现在不仅在台式机和服务器上盛行，而且在所有可编程平台上越来越普遍，包括手机等在内。
+
+​		在这一部分，我们加上虚拟化拼图中更关键的一块：持久存储（persistent storage）。永久存储设备永久地（或至少长时间地）存储信息，如传统硬盘驱动器（hard disk drive）或更现代的固态存储设备（solid-state storage device）。持久存储设备与内存不同。内存在断电时，其内容会丢失，而持久存储设备会保持这些数据不变。因此，操作系统必须特别注意这样的设备：用户用它们保存真正关心的数据。
+
+#### 关键问题：如何管理持久存储设备
+
+**操作系统应该如何管理持久存储设备？都需要哪些 API？实现有哪些重要方面？**
+
+​		接下来几章会讨论管理持久数据的一些关键技术，重点是如何提高性能及可靠性。但
+
+是，我们先从总体上看看 API：你在与 UNIX 文件系统交互时会看到的接口。
+
 ### 39.1 文件和目录
 
 操作系统通过虚拟化持久存储设备来管理数据。持久存储设备，如硬盘驱动器和固态存储设备，可以长时间存储信息，即使在断电后也不会丢失。这与内存不同，内存在断电时会丢失其内容。文件系统的任务是管理这些持久存储设备，并确保数据的可靠存储和检索。
@@ -6,6 +20,30 @@
 
 - **文件**：文件是一个线性字节数组，可以被读取和写入。每个文件都有一个唯一的标识符（如 inode 号），用于内部识别。操作系统通常不关心文件的内容类型，只负责存储和管理这些数据。
 - **目录**：目录包含一个（用户可读名称，低级名称）的列表，将用户可读名称映射到文件的低级名称（如 inode 号）。目录可以包含文件或其他目录，形成一个目录树结构，从根目录（“/”）开始，通过分隔符命名子目录，直到指定的文件或目录。
+
+#### 原文：
+
+​		随着时间的推移，存储虚拟化形成了两个关键的抽象。第一个是文件（file）。文件就是一个线性字节数组，每个字节都可以读取或写入。每个文件都有某种低级名称（low-level name），通常是某种数字。用户通常不知道这个名字（我们稍后会看到）。由于历史原因，文件的低级名称通常称为 inode 号（inode number）。我们将在以后的章节中学习更多关于inode 的知识。现在，只要假设每个文件都有一个与其关联的 inode 号。
+
+​		在大多数系统中，操作系统不太了解文件的结构（例如，它是图片、文本文件还是 C代码）。相反，文件系统的责任仅仅是将这些数据永久存储在磁盘上，并确保当你再次请求数据时，得到你原来放在那里的内容。做到这一点并不像看起来那么简单！ 
+
+​		第二个抽象是目录（directory）。一个目录，像一个文件一样，也有一个低级名字（即inode 号），但是它的内容非常具体：它包含一个（用户可读名字，低级名字）对的列表。例如，假设存在一个低级别名称为“10”的文件，它的用户可读的名称为“foo”。“foo”所在的目录因此会有条目（“foo”，“10”），将用户可读名称映射到低级名称。目录中的每个条目都指向文件或其他目录。通过将目录放入其他目录中，用户可以构建任意的目录树（directory tree，或目录层次结构，directory hierarchy），在该目录树下存储所有文件和目录。
+
+​		目录层次结构从根目录（root directory）开始（在基于 UNIX 的系统中，根目录就记为“/”），并使用某种分隔符（separator）来命名后续子目录（sub-directories），直到命名所需的文件或目录。例如，如果用户在根目录中创建了一个目录 foo，然后在目录 foo中创建了一个文件 bar.txt，我们就可以通过它的绝对路径名（absolute pathname）来引用该文件，在这个例子中，它将是/foo/bar.txt。更复杂的目录树，请参见图 39.1。示例中的有效目录是/，/foo，/bar，/bar/bar，/bar/foo，有效的文件是/foo/bar.txt 和/bar/foo/bar.txt。目录和文件可以具有相同的名称，只要它们位于文件系统树的不同位置（例如，图中有两个名为 bar.txt 的文件：/foo/bar.txt 和/bar/foo/bar.txt）。
+
+![image-20240902012737930](image/image-20240902012737930.png)
+
+​		你可能还会注意到，这个例子中的文件名通常包含两部分：bar 和 txt，以句点分隔。第一部分是任意名称，而文件名的第二部分通常用于指示文件的类型（type），例如，它是 C代码（例如.c）还是图像（例如.jpg），或音乐文件（例如.mp3）。然而，这通常只是一个惯例（convention）：一般不会强制名为 main.c 的文件中包含的数据确实是 C 源代码。
+
+​		因此，我们可以看到文件系统提供的了不起的东西：一种方便的方式来命名我们感兴趣的所有文件。名称在系统中很重要，因为访问任何资源的第一步是能够命名它。在 UNIX系统中，文件系统提供了一种统一的方式来访问磁盘、U 盘、CD-ROM、许多其他设备上的文件，事实上还有很多其他的东西，都位于单一目录树下。
+
+
+
+
+
+
+
+
 
 ### 39.2 文件系统接口
 
@@ -16,8 +54,6 @@
 文件的创建可以通过 `open()` 系统调用完成。调用 `open()` 并传入 `O_CREAT` 标志可以创建一个新文件。以下是一个示例代码，用于在当前工作目录中创建一个名为 "foo" 的文件：
 
 ```
-c
-复制代码
 int fd = open("foo", O_CREAT | O_WRONLY | O_TRUNC);
 ```
 
@@ -29,7 +65,7 @@ int fd = open("foo", O_CREAT | O_WRONLY | O_TRUNC);
 
 `open()` 的返回值是一个文件描述符（file descriptor），这是一个整数，用于标识进程中的打开文件。文件描述符是进程私有的，用于后续的文件操作，如读取或写入。
 
-### 补充：creat() 系统调用
+### 补充：create() 系统调用
 
 旧的创建文件方法是使用 `creat()` 系统调用，这个函数的作用类似于 `open()`，但只创建文件并以只写模式打开。虽然 `creat()` 已经过时，但它在 UNIX 系统的历史中占有一席之地。
 
@@ -55,8 +91,6 @@ int fd = open("foo", O_CREAT | O_WRONLY | O_TRUNC);
 `lseek()` 的原型如下：
 
 ```
-c
-复制代码
 off_t lseek(int fildes, off_t offset, int whence);
 ```
 
@@ -75,7 +109,7 @@ off_t lseek(int fildes, off_t offset, int whence);
 以下是一个使用 `fsync()` 的简单示例：
 
 ```
-c复制代码int fd = open("foo", O_CREAT | O_WRONLY | O_TRUNC);
+int fd = open("foo", O_CREAT | O_WRONLY | O_TRUNC);
 assert(fd > -1);
 int rc = write(fd, buffer, size);
 assert(rc == size);
@@ -94,7 +128,7 @@ assert(rc == 0);
 例如，在文件编辑器（如 `emacs`）中，当用户保存文件时，编辑器会将文件的新版本写入一个临时文件（如 `foo.txt.tmp`），然后使用 `fsync()` 确保数据被写入磁盘。接着，它通过调用 `rename()` 将临时文件重命名为原始文件名称，从而实现对文件的原子更新：
 
 ```
-c复制代码int fd = open("foo.txt.tmp", O_WRONLY|O_CREAT|O_TRUNC);
+int fd = open("foo.txt.tmp", O_WRONLY|O_CREAT|O_TRUNC);
 write(fd, buffer, size); // write out new version of file
 fsync(fd);
 close(fd);
@@ -124,7 +158,7 @@ rename("foo.txt.tmp", "foo.txt");
 例如，使用命令 `stat` 可以查看某个文件的元数据信息：
 
 ```
-bash复制代码prompt> echo hello > file 
+prompt> echo hello > file 
 prompt> stat file 
  File: 'file' 
  Size: 6 Blocks: 8 IO Block: 4096 regular file 
@@ -144,7 +178,7 @@ Change: 2011-05-03 15:50:20.157594748 -0500
 例如，使用 `strace` 追踪删除文件的过程，可以看到如下的系统调用：
 
 ```
-bash复制代码prompt> strace rm foo 
+prompt> strace rm foo 
 ... 
 unlink("foo") = 0 
 ... 
@@ -159,7 +193,7 @@ unlink("foo") = 0
 例如，创建一个名为 `foo` 的目录，可以使用如下命令并追踪其系统调用：
 
 ```
-bash复制代码prompt> strace mkdir foo 
+prompt> strace mkdir foo 
 ... 
 mkdir("foo", 0777) = 0 
 ... 
@@ -183,7 +217,7 @@ bash复制代码prompt> ls -a foo
 以下是一个简单的示例程序，演示如何使用这些调用读取目录内容并打印每个文件的名称和 inode 编号：
 
 ```
-c复制代码int main(int argc, char *argv[]) { 
+int main(int argc, char *argv[]) { 
     DIR *dp = opendir("."); 
     assert(dp != NULL); 
     struct dirent *d; 
@@ -216,7 +250,7 @@ c复制代码int main(int argc, char *argv[]) {
 硬链接允许在文件系统中创建多个指向同一文件的名称。通过 `link()` 系统调用，我们可以创建一个新文件名，指向与已有文件相同的 inode。命令行工具 `ln` 用于创建硬链接。以下是一个简单的示例：
 
 ```
-bash复制代码prompt> echo hello > file 
+prompt> echo hello > file 
 prompt> ln file file2 
 prompt> cat file2 
 hello
@@ -235,7 +269,7 @@ bash复制代码prompt> ls -i file file2
 以下是一个关于硬链接和引用计数的示例：
 
 ```
-bash复制代码prompt> echo hello > file 
+prompt> echo hello > file 
 prompt> stat file 
 ... Inode: 67158084 Links: 1 ... 
 prompt> ln file file2 
@@ -279,7 +313,7 @@ hello
 1. **文件类型**：符号链接是文件系统中与常规文件和目录不同的第三种文件类型。通过 `stat` 命令，可以看到符号链接的文件类型被标识为 `symbolic link`：
 
    ```
-   bash复制代码prompt> stat file 
+   prompt> stat file 
    ... regular file ...
    prompt> stat file2 
    ... symbolic link ...
@@ -288,7 +322,7 @@ hello
 2. **文件大小**：符号链接的大小等于它所指向的文件路径名的长度。例如，指向 `file` 的符号链接 `file2` 大小为 4 个字节，因为 `file` 这个路径名的长度为 4 个字符。
 
    ```
-   bash复制代码prompt> ls -al 
+   prompt> ls -al 
    drwxr-x--- 2 remzi remzi 29 May 3 19:10 ./
    drwxr-x--- 27 remzi remzi 4096 May 3 15:14 ../
    -rw-r----- 1 remzi remzi 6 May 3 19:10 file 
@@ -298,7 +332,7 @@ hello
    如果符号链接指向一个更长的文件路径名，那么符号链接的大小也会相应增加：
 
    ```
-   bash复制代码prompt> echo hello > alongerfilename 
+   prompt> echo hello > alongerfilename 
    prompt> ln -s alongerfilename file3 
    prompt> ls -al alongerfilename file3 
    -rw-r----- 1 remzi remzi 6 May 3 19:17 alongerfilename 
@@ -308,7 +342,7 @@ hello
 3. **悬空引用（Dangling Reference）**：由于符号链接是指向另一个文件路径的引用，当被引用的文件被删除时，符号链接会变成一个悬空引用（dangling reference），即符号链接仍然存在，但它指向的文件不存在了。
 
    ```
-   bash复制代码prompt> echo hello > file 
+   prompt> echo hello > file 
    prompt> ln -s file file2 
    prompt> cat file2 
    hello 
@@ -336,8 +370,6 @@ hello
 例如，假设有一个存储在 `/dev/sda1` 分区上的 `ext3` 文件系统，其中包含一个根目录和两个子目录 `a` 和 `b`，每个子目录中都有一个名为 `foo` 的文件。如果希望将该文件系统挂载到现有的目录 `/home/users` 上，可以使用以下命令：
 
 ```
-bash
-复制代码
 prompt> mount -t ext3 /dev/sda1 /home/users
 ```
 
@@ -346,7 +378,7 @@ prompt> mount -t ext3 /dev/sda1 /home/users
 通过 `mount` 命令可以查看系统上所有已挂载的文件系统及其挂载点。例如：
 
 ```
-bash复制代码/dev/sda1 on / type ext3 (rw)
+/dev/sda1 on / type ext3 (rw)
 proc on /proc type proc (rw)
 sysfs on /sys type sysfs (rw)
 ```
