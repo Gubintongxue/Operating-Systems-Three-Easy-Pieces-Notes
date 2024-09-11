@@ -409,7 +409,7 @@ c复制代码// Control Register at address 0x3F6
 
 误寄存器来获取详细信息。
 
-```
+```C
 static int ide_wait_ready() { 
  while (((int r = inb(0x1f7)) & IDE_BSY) || !(r & IDE_DRDY)) 
  ; // loop until drive isn't busy 
@@ -461,7 +461,7 @@ void ide_intr() {
 
 以下是简化版的 xv6 IDE 硬盘驱动程序代码，包括详细注释和过程简述。这段代码主要涉及硬盘请求的发起和处理，利用 IDE 控制器的寄存器来执行读写操作。
 
-```
+```C
 c复制代码// 等待硬盘准备好
 static int ide_wait_ready() { 
     // 循环等待，直到硬盘不再忙 (BSY = 0) 且准备好 (DRDY = 1)
